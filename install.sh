@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# THÔNG TIN REPO CỦA BẠN (ĐÃ FIX THEO LINK)
+# THÔNG TIN REPO CỦA BẠN (pkd11011)
 # ==========================================
 MY_USER="pkd11011"
 MY_REPO="Xrayr0.9.5"
@@ -25,23 +25,41 @@ elif cat /etc/issue | grep -Eqi "debian"; then
     release="debian"
 elif cat /etc/issue | grep -Eqi "ubuntu"; then
     release="ubuntu"
+elif cat /etc/issue | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
 elif cat /proc/version | grep -Eqi "debian"; then
     release="debian"
 elif cat /proc/version | grep -Eqi "ubuntu"; then
     release="ubuntu"
+elif cat /proc/version | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
 else
-    release="ubuntu" # Mặc định nếu không nhận diện được
+    echo -e "${red}Không nhận diện được hệ điều hành!${plain}\n" && exit 1
 fi
 
-# Tự động nhận diện kiến trúc CPU
 arch=$(arch)
+
 if [[ $arch == "x86_64" || $arch == "x64" || $arch == "amd64" ]]; then
     arch="64"
 elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
     arch="arm64-v8a"
+elif [[ $arch == "s390x" ]]; then
+    arch="s390x"
 else
     arch="64"
-    echo -e "${yellow}Không xác định được kiến trúc, mặc định dùng x64${plain}"
+    echo -e "${red}Phát hiện kiến trúc thất bại, dùng mặc định x64${plain}"
+fi
+
+echo "Kiến trúc CPU: ${arch}"
+
+if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
+    echo "Phần mềm này chỉ hỗ trợ hệ điều hành 64-bit."
+    exit 2
+fi
+
+os_version=""
+if [[ -f /etc/os-release ]]; then
+    os_version=$(awk -F'[= ."]' '/VERSION_ID/{print $3}' /etc/os-release)
 fi
 
 install_base() {
@@ -54,6 +72,18 @@ install_base() {
     fi
 }
 
+check_status() {
+    if [[ ! -f /etc/systemd/system/XrayR.service ]]; then
+        return 2
+    fi
+    temp=$(systemctl status XrayR | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+    if [[ x"${temp}" == x"running" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 install_XrayR() {
     if [[ -e /usr/local/XrayR/ ]]; then
         rm /usr/local/XrayR/ -rf
@@ -62,14 +92,14 @@ install_XrayR() {
     mkdir /usr/local/XrayR/ -p
     cd /usr/local/XrayR/
 
-    echo -e "${green}Đang tải XrayR ${MY_TAG} từ nguồn: ${MY_USER}/${MY_REPO}...${plain}"
+    # Luôn cài bản v0.9.5 từ Repo của bạn
+    last_version="${MY_TAG}"
     
-    # Link tải file zip từ Release của bạn
-    url="https://github.com/${MY_USER}/${MY_REPO}/releases/download/${MY_TAG}/XrayR-linux-${arch}.zip"
+    echo -e "Bắt đầu tải XrayR từ nguồn cá nhân: ${MY_USER}/${MY_REPO}"
+    wget -q -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip https://github.com/${MY_USER}/${MY_REPO}/releases/download/${last_version}/XrayR-linux-${arch}.zip
     
-    wget -q -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
     if [[ $? -ne 0 ]]; then
-        echo -e "${red}Tải file XrayR thất bại! Hãy chắc chắn file XrayR-linux-${arch}.zip tồn tại trong Release ${MY_TAG}.${plain}"
+        echo -e "${red}Tải file thất bại! Hãy chắc chắn bạn đã upload đủ 49 file Assets vào Release ${MY_TAG}.${plain}"
         exit 1
     fi
 
@@ -78,7 +108,8 @@ install_XrayR() {
     chmod +x XrayR
     mkdir /etc/XrayR/ -p
     
-    # Tải file service từ repo của pkd11011
+    # Tải file service từ repo của bạn
+    systemctl unmask XrayR 2>/dev/null
     rm /etc/systemd/system/XrayR.service -f
     file_service="https://raw.githubusercontent.com/${MY_USER}/${MY_REPO}/master/XrayR.service"
     wget -q -N --no-check-certificate -O /etc/systemd/system/XrayR.service ${file_service}
@@ -87,7 +118,9 @@ install_XrayR() {
     systemctl stop XrayR
     systemctl enable XrayR
     
-    # Copy các file cần thiết
+    echo -e "${green}XrayR ${last_version}${plain} đã cài đặt thành công."
+    
+    # Copy các file database nếu có
     [[ -f geoip.dat ]] && cp geoip.dat /etc/XrayR/
     [[ -f geosite.dat ]] && cp geosite.dat /etc/XrayR/ 
 
@@ -95,19 +128,20 @@ install_XrayR() {
         cp config.yml /etc/XrayR/
     fi
 
-    # Tải script quản lý XrayR.sh (Menu) từ repo của pkd11011
+    # Tải script quản lý XrayR.sh từ repo của bạn
     curl -fLo /usr/bin/XrayR https://raw.githubusercontent.com/${MY_USER}/${MY_REPO}/master/XrayR.sh
     chmod +x /usr/bin/XrayR
     ln -sf /usr/bin/XrayR /usr/bin/xrayr 
+    chmod +x /usr/bin/xrayr
     
     systemctl start XrayR
     
-    echo -e "${green}XrayR ${MY_TAG}${plain} đã cài đặt thành công!"
-    echo -e "------------------------------------------"
-    echo -e "Gõ ${yellow}XrayR${plain} để mở menu quản lý"
-    echo -e "File cấu hình: /etc/XrayR/config.yml"
-    echo -e "------------------------------------------"
+    cd $cur_dir
+    rm -f install.sh
+    echo -e ""
+    echo "Cài đặt hoàn tất! Gõ 'XrayR' để mở menu quản lý."
 }
 
+echo -e "${green}Bắt đầu cài đặt XrayR (Nguồn: ${MY_USER})${plain}"
 install_base
-install_XrayR $1
+install_XrayR
